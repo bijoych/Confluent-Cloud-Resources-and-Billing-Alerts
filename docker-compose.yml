@@ -1,0 +1,42 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: alerts
+      POSTGRES_PASSWORD: alerts
+      POSTGRES_DB: confluent_alerts
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  alerting:
+    build: .
+    depends_on:
+      - postgres
+    env_file:
+      - config/secrets.env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://alerts:alerts@postgres:5432/confluent_alerts
+    volumes:
+      - ./config:/app/config
+
+  dashboard:
+    build: .
+    command: ["python", "-m", "dashboard.app"]
+    entrypoint: []
+    depends_on:
+      - postgres
+    env_file:
+      - config/secrets.env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://alerts:alerts@postgres:5432/confluent_alerts
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./config:/app/config
+
+volumes:
+  pgdata:

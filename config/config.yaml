@@ -1,0 +1,77 @@
+# Confluent Cloud Resource & Billing Alerting System — POC config
+#
+# Values here are POC defaults. Anything cost/threshold related should be
+# reviewed with whoever owns the Confluent Cloud budget before relying on
+# alerts in production.
+
+organization:
+  id: "${CONFLUENT_ORG_ID}"
+  # Environments are discovered automatically from the org on every cycle,
+  # so a newly created environment is picked up with no config change.
+  #
+  # environment_ids is an OPTIONAL allowlist — leave it empty to watch every
+  # environment the API key can see (the default). Only set it if you want to
+  # scope monitoring to specific environments. Placeholder "env-example..."
+  # values are ignored.
+  environment_ids: []
+  # Optional: environments to skip even when discovering all (e.g. sandboxes).
+  exclude_environment_ids: []
+
+polling:
+  metrics_interval_minutes: 15
+  billing_interval_minutes: 60      # billing accrues hourly; costs API lags up to 72h
+  quota_interval_minutes: 60
+  cloud_resources_interval_minutes: 15
+  audit_log_interval_minutes: 5
+
+budget:
+  # Default monthly budget. Override without editing this file by setting
+  # MONTHLY_BUDGET_USD in secrets.env (that env var takes precedence).
+  monthly_budget_usd: 1000.00
+  thresholds_pct: [50, 80, 100]
+  daily_spend_spike_multiplier: 2.0   # alert if daily spend > 2x trailing 7-day avg
+  forecast_enabled: true
+
+quota:
+  # Mirrors Confluent Cloud's own native quota-notification thresholds.
+  thresholds_pct:
+    - {pct: 50, severity: INFO}
+    - {pct: 90, severity: WARNING}
+    - {pct: 100, severity: CRITICAL}
+
+resource_health:
+  cluster_utilization_pct_threshold: 80
+  cluster_utilization_sustained_minutes: 15
+  idle_throughput_window_hours: 24
+  idle_throughput_bytes_threshold: 1024  # essentially zero traffic
+  connector_restart_count_threshold: 3
+  connector_restart_window_minutes: 30
+
+dedup:
+  default_cooldown_minutes: 60
+  # Per-category overrides
+  cooldown_minutes_by_category:
+    billing: 360
+    quota: 240
+    resource_lifecycle: 30
+    resource_utilization: 60
+    security_and_audit: 15
+
+audit_log:
+  enabled: false
+  bootstrap_servers: ""
+  topic: "confluent-audit-log-events"
+  # Cluster API key for the audit log cluster goes in secrets.env as
+  # CONFLUENT_AUDIT_LOG_API_KEY / _SECRET (not required while enabled=false)
+
+notifiers:
+  slack:
+    enabled: true
+  email:
+    enabled: false
+  generic_webhook:
+    enabled: false
+
+dashboard:
+  daily_summary_enabled: true
+  daily_summary_send_hour_utc: 13

@@ -1,0 +1,113 @@
+# Default rule set for the POC. Matches the design doc's "Recommended
+# starting scope": billing thresholds, quota thresholds, failed connectors,
+# idle resources, and Slack notifications — before tackling full invoice
+# reconciliation or predictive forecasting.
+#
+# Each rule is evaluated by rules_engine/engine.py against the "facts"
+# dict assembled per polling cycle (see scheduler/main.py). `metric` names
+# here are engine-internal keys (assembled by the collectors/normalizer),
+# NOT raw Confluent Metrics API metric names.
+
+rules:
+  - name: monthly_budget_threshold
+    category: billing
+    metric: mtd_spend_pct_of_budget
+    scope: organization
+    severity_thresholds:
+      - {value: 50, severity: INFO}
+      - {value: 80, severity: WARNING}
+      - {value: 100, severity: CRITICAL}
+    message_template: >-
+      Month-to-date accrued spend is {current_value:.1f}% of the
+      ${budget_usd:,.0f} monthly budget (${mtd_spend_usd:,.2f} so far).
+      This is an accrued estimate, not a final invoice figure.
+    cooldown_minutes: 360
+
+  - name: forecast_month_end_over_budget
+    category: forecasting
+    metric: forecast_pct_of_budget
+    scope: organization
+    severity_thresholds:
+      - {value: 100, severity: WARNING}
+    message_template: >-
+      Projected month-end spend is ${forecast_usd:,.2f}, which is
+      {current_value:.1f}% of the ${budget_usd:,.0f} monthly budget.
+      Linear projection from month-to-date accrued spend.
+    cooldown_minutes: 720
+
+  - name: daily_spend_spike
+    category: billing
+    metric: daily_spend_ratio_to_trailing_avg
+    scope: organization
+    severity_thresholds:
+      - {value: 2.0, severity: WARNING}
+    message_template: >-
+      Yesterday's accrued spend (${yesterday_spend_usd:,.2f}) was
+      {current_value:.1f}x the trailing 7-day daily average
+      (${trailing_avg_usd:,.2f}).
+    cooldown_minutes: 1440
+
+  - name: quota_utilization
+    category: capacity_and_quotas
+    metric: quota_utilization_pct
+    scope: per_quota
+    severity_thresholds:
+      - {value: 50, severity: INFO}
+      - {value: 90, severity: WARNING}
+      - {value: 100, severity: CRITICAL}
+    message_template: >-
+      Quota "{resource_id}" is at {current_value:.1f}% of its applied limit.
+    cooldown_minutes: 240
+
+  - name: connector_failed
+    category: resource_utilization
+    metric: connector_failed
+    scope: per_resource
+    severity_thresholds:
+      - {value: 1, severity: CRITICAL}
+    message_template: "Connector {resource_id} is in a FAILED state."
+    cooldown_minutes: 30
+
+  - name: cluster_idle_with_cost
+    category: resource_utilization
+    metric: idle_with_nonzero_cost
+    scope: per_resource
+    severity_thresholds:
+      - {value: 1, severity: WARNING}
+    message_template: >-
+      Cluster {resource_id} incurred cost but had near-zero throughput
+      over the last 24h — check for an unused/forgotten resource.
+    cooldown_minutes: 1440
+
+  - name: cluster_utilization_high
+    category: resource_utilization
+    metric: cluster_utilization_pct
+    scope: per_resource
+    severity_thresholds:
+      - {value: 80, severity: WARNING}
+    message_template: >-
+      Cluster {resource_id} utilization has been at
+      {current_value:.1f}% for the sustained-check window.
+    cooldown_minutes: 60
+
+  - name: flink_pool_idle
+    category: resource_utilization
+    metric: flink_pool_idle
+    scope: per_resource
+    severity_thresholds:
+      - {value: 1, severity: WARNING}
+    message_template: >-
+      Flink compute pool {resource_id} is provisioned but using 0 CFUs —
+      it may be incurring cost without active queries.
+    cooldown_minutes: 1440
+
+  - name: resource_deleted_unexpectedly
+    category: resource_lifecycle
+    metric: resource_disappeared
+    scope: per_resource
+    severity_thresholds:
+      - {value: 1, severity: WARNING}
+    message_template: >-
+      Resource {resource_id} was present in the previous poll but is
+      missing now — confirm this deletion was intentional.
+    cooldown_minutes: 30

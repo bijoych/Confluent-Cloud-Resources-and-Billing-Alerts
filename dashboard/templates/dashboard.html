@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Confluent Cloud Alerting — Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f4ef; --surface: #ffffff; --surface-2: #faf9f5; --border: #e4e2da;
+    --text: #1f1e1c; --muted: #6b6a64; --accent: #2f6fb3;
+    --info: #185fa5; --info-bg: #e6f1fb;
+    --warn: #a15c00; --warn-bg: #faeeda;
+    --crit: #b00020; --crit-bg: #fcebeb;
+    --ok: #3b6d11; --ok-bg: #eaf3de;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1b19; --surface: #262523; --surface-2: #2c2b28; --border: #3a3936;
+      --text: #ecebe4; --muted: #9c9a92; --accent: #6ea8e0;
+      --info: #85b7eb; --info-bg: #12314a;
+      --warn: #efc06b; --warn-bg: #402f12;
+      --crit: #f09595; --crit-bg: #3a1414;
+      --ok: #97c459; --ok-bg: #1d3410;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px; line-height: 1.5;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+    padding: 18px 24px; background: var(--surface); border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 17px; font-weight: 600; margin: 0; }
+  header .meta { font-size: 12px; color: var(--muted); }
+  header .meta code { background: var(--surface-2); padding: 1px 6px; border-radius: 4px; }
+  .controls { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); }
+  button {
+    font: inherit; font-size: 12px; padding: 6px 12px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text); cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  main { padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+  .grid { display: grid; gap: 16px; }
+  .kpis { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 16px; }
+  .cols-2 { grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px;
+  }
+  .card h2 { font-size: 13px; font-weight: 600; margin: 0 0 12px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.04em; }
+  .kpi .value { font-size: 26px; font-weight: 600; margin: 2px 0; }
+  .kpi .sub { font-size: 12px; color: var(--muted); }
+  .bar-track { height: 6px; background: var(--surface-2); border-radius: 3px; margin-top: 10px; overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width .4s; }
+  .bar-fill.warn { background: var(--warn); }
+  .bar-fill.crit { background: var(--crit); }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .pill.INFO { background: var(--info-bg); color: var(--info); }
+  .pill.WARNING { background: var(--warn-bg); color: var(--warn); }
+  .pill.CRITICAL { background: var(--crit-bg); color: var(--crit); }
+  .pill.PROVISIONED, .pill.RUNNING { background: var(--ok-bg); color: var(--ok); }
+  .pill.FAILED { background: var(--crit-bg); color: var(--crit); }
+  .pill.PAUSED { background: var(--warn-bg); color: var(--warn); }
+  .sev-counts { display: flex; gap: 8px; margin-top: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); font-weight: 600; }
+  td code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .quota-row { margin-bottom: 12px; }
+  .quota-row .label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  .note { font-size: 11px; color: var(--muted); margin-top: 10px; font-style: italic; }
+  .full { grid-column: 1 / -1; }
+  .chart-wrap { position: relative; height: 240px; }
+  .progress-track { height: 3px; background: var(--surface-2); border-radius: 2px; overflow: hidden; margin-bottom: 8px; }
+  .progress-bar { height: 100%; width: 40%; background: var(--accent); border-radius: 2px; animation: indeterminate 1.1s ease-in-out infinite; }
+  @keyframes indeterminate { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Confluent Cloud — Resource &amp; Billing Alerts</h1>
+    <div class="meta">Org <code>{{ org_id }}</code> · Monthly budget ${{ '{:,.0f}'.format(budget_usd) }}</div>
+  </div>
+  <div class="controls">
+    <span id="updated">—</span>
+    <label><input type="checkbox" id="auto" checked> auto-refresh</label>
+    <button id="refresh">Refresh</button>
+  </div>
+</header>
+
+<main>
+  <div class="grid kpis">
+    <div class="card kpi">
+      <h2>MTD accrued spend</h2>
+      <div class="value" id="k-spend">—</div>
+      <div class="sub" id="k-spend-sub">accrued estimate, not final invoice</div>
+      <div class="bar-track"><div class="bar-fill" id="k-spend-bar" style="width:0%"></div></div>
+    </div>
+    <div class="card kpi">
+      <h2>Projected month-end</h2>
+      <div class="value" id="k-forecast">—</div>
+      <div class="sub" id="k-forecast-sub">linear projection</div>
+    </div>
+    <div class="card kpi">
+      <h2>Budget used</h2>
+      <div class="value" id="k-pct">—</div>
+      <div class="sub">of ${{ '{:,.0f}'.format(budget_usd) }} budget</div>
+    </div>
+    <div class="card kpi">
+      <h2>Alerts (24h)</h2>
+      <div class="value" id="k-alerts">—</div>
+      <div class="sev-counts" id="k-alert-sev"></div>
+    </div>
+  </div>
+
+  <div class="card full" style="margin-bottom:16px">
+    <div style="display:flex; flex-wrap:wrap; align-items:flex-end; gap:16px; margin-bottom:12px">
+      <h2 style="margin:0">Accrued spend trend</h2>
+      <div style="font-size:12px; color:var(--muted); align-self:flex-end">Last 12 months</div>
+      <div style="flex:1"></div>
+      <div style="text-align:right">
+        <div id="trendStatLabel" style="font-size:12px; color:var(--muted)">Total</div>
+        <div id="trendStatValue" style="font-size:22px; font-weight:600">—</div>
+      </div>
+    </div>
+    <div id="trendHint" style="font-size:12px; color:var(--muted); margin-bottom:6px"></div>
+    <div id="trendProgress" class="progress-track" style="display:none"><div class="progress-bar"></div></div>
+    <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+  </div>
+
+  <div class="grid cols-2" style="margin-bottom:16px">
+    <div class="card">
+      <h2>Top cost by resource</h2>
+      <table><thead><tr><th>Resource</th><th style="text-align:right">Accrued (USD)</th></tr></thead>
+        <tbody id="resource-cost"></tbody></table>
+    </div>
+    <div class="card">
+      <h2>Spend by product</h2>
+      <div class="chart-wrap"><canvas id="productChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="card full" style="margin-bottom:16px">
+    <h2>Quota utilization</h2>
+    <div id="quotas"></div>
+  </div>
+
+  <div class="card full" style="margin-bottom:16px">
+    <h2>Recent alerts</h2>
+    <table><thead><tr><th>Severity</th><th>Rule</th><th>Resource</th><th>Message</th><th>When</th><th>Status</th></tr></thead>
+      <tbody id="alerts"></tbody></table>
+  </div>
+
+  <div class="grid cols-2">
+    <div class="card">
+      <h2>Kafka clusters</h2>
+      <table><thead><tr><th>Cluster</th><th>Kind</th><th>Cloud/Region</th><th>Status</th></tr></thead>
+        <tbody id="clusters"></tbody></table>
+    </div>
+    <div class="card">
+      <h2>Connectors</h2>
+      <table><thead><tr><th>Connector</th><th>State</th><th>Tasks</th><th>Failed</th></tr></thead>
+        <tbody id="connectors"></tbody></table>
+    </div>
+  </div>
+
+  <div class="card full" style="margin-top:16px">
+    <h2>Flink compute pools</h2>
+    <table><thead><tr><th>Pool</th><th>Cloud/Region</th><th>CFU (current / max)</th><th>Status</th></tr></thead>
+      <tbody id="flink"></tbody></table>
+  </div>
+
+  <p class="note">All cost figures are accrued estimates from the Confluent Cloud Costs API
+    (which can lag actual usage by up to 72h) — not final invoice values. Run
+    <code>python -m scheduler.main --once</code> to refresh the underlying snapshot.</p>
+</main>
+
+<script>
+const fmtUSD = n => '$' + (n ?? 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const el = id => document.getElementById(id);
+const esc = s => (s ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+let productChart;
+
+function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+function renderSummary(s, counts) {
+  el('k-spend').textContent = fmtUSD(s.mtd_spend_usd);
+  el('k-forecast').textContent = fmtUSD(s.forecast_usd);
+  el('k-forecast-sub').textContent = s.over_budget_forecast ? '⚠ over budget' : 'within budget';
+  el('k-forecast-sub').style.color = s.over_budget_forecast ? css('--crit') : css('--muted');
+  el('k-pct').textContent = (s.pct_of_budget ?? 0) + '%';
+  const bar = el('k-spend-bar');
+  bar.style.width = Math.min(s.pct_of_budget ?? 0, 100) + '%';
+  bar.className = 'bar-fill' + (s.pct_of_budget >= 100 ? ' crit' : s.pct_of_budget >= 80 ? ' warn' : '');
+
+  el('k-alerts').textContent = counts.total ?? 0;
+  el('k-alert-sev').innerHTML = ['CRITICAL','WARNING','INFO']
+    .filter(k => counts[k]).map(k => `<span class="pill ${k}">${counts[k]} ${k.toLowerCase()}</span>`).join('') || '<span class="sub">none</span>';
+}
+
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let trendChart;
+const isDark = (document.documentElement.dataset.mode || '') === 'dark'
+  || (!document.documentElement.dataset.mode && matchMedia('(prefers-color-scheme: dark)').matches);
+const LINE = isDark ? '#3987e5' : '#2a78d6';
+
+let trendLoading = false;
+async function loadTrend() {
+  // Load and display the last 12 months of monthly accrued cost. Uncached
+  // months are fetched once (spaced, cached); the auto-refresh timer never
+  // calls this, so it isn't a repeated cost.
+  if (trendLoading) return;
+  trendLoading = true;
+  el('trendProgress').style.display = 'block';
+  el('trendHint').textContent = 'Loading last 12 months…';
+  try {
+    const d = await (await fetch('/api/costs/trailing?months=12')).json();
+    if (d.error) throw new Error(d.error);
+    const labels = d.series.map(s => s.label);
+    const values = d.series.map(s => s.amount);
+    el('trendStatLabel').textContent = 'Last 12 months total';
+    el('trendStatValue').textContent = fmtUSD(d.total);
+    const gaps = d.series.filter(s => s.available === false).length;
+    el('trendHint').textContent = 'Monthly accrued spend, last 12 months'
+      + (gaps ? ` · ${gaps} month(s) unavailable` : '');
+    renderTrendChart(labels, values, true);
+  } catch (e) {
+    el('trendHint').textContent = 'Could not load cost history: ' + e.message;
+  } finally {
+    trendLoading = false;
+    el('trendProgress').style.display = 'none';
+  }
+}
+
+function renderTrendChart(labels, values, monthly) {
+  const ctx = el('trendChart');
+  const tick = css('--muted') || '#898781';
+  const grid = isDark ? '#2c2c2a' : '#e1e0d9';
+  const cfg = {
+    type: 'line',
+    data: { labels, datasets: [{ data: values, borderColor: LINE, backgroundColor: 'rgba(42,120,214,0.10)',
+      borderWidth: 2, pointRadius: monthly ? 4 : 2, pointBackgroundColor: LINE,
+      pointBorderColor: isDark ? '#1a1a19' : '#fcfcfb', pointBorderWidth: 2, tension: 0.35, fill: true, spanGaps: false }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { title: it => (monthly ? '' : 'Day ') + it[0].label, label: c => fmtUSD(c.parsed.y) } } },
+      scales: { y: { beginAtZero: true, ticks: { color: tick, callback: v => '$' + v }, grid: { color: grid } },
+                x: { ticks: { color: tick, autoSkip: !monthly, maxRotation: 0 }, grid: { display: false } } } }
+  };
+  if (trendChart) { trendChart.data = cfg.data; trendChart.options = cfg.options; trendChart.update(); }
+  else trendChart = new Chart(ctx, cfg);
+}
+
+const PRODUCT_LABELS = {
+  KAFKA:'Kafka', CONNECT:'Connect', CUSTOM_CONNECT:'Custom Connect', FLINK:'Flink',
+  TABLEFLOW:'Tableflow', KSQL:'ksqlDB', STREAM_GOVERNANCE:'Stream Governance',
+  GOVERNANCE:'Stream Governance', CLUSTER_LINKING:'Cluster Linking', AUDIT_LOG:'Audit Log',
+  KAFKA_REST_PROXY:'REST Proxy', SUPPORT_CLOUD:'Support'
+};
+function productLabel(p){
+  if(!p) return 'Other';
+  if(PRODUCT_LABELS[p]) return PRODUCT_LABELS[p];
+  return p.split('_').map(w => w.charAt(0)+w.slice(1).toLowerCase()).join(' ');
+}
+
+function renderProductChart(data) {
+  const ctx = el('productChart');
+  const palette = ['#2a78d6','#eb6834','#1baf7a','#eda100','#e87ba4','#008300','#6250d6','#e34948','#888780'];
+  if (productChart) productChart.destroy();
+  productChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels: data.map(d => productLabel(d.product)), datasets: [{ data: data.map(d => d.amount),
+      backgroundColor: palette, borderColor: css('--surface'), borderWidth: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { color: css('--text'), boxWidth: 12, font: { size: 11 } } } } }
+  });
+}
+
+const RESOURCE_PREFIX_TYPES = [
+  ['lkc-', 'KAFKA'], ['lcc-', 'CONNECT'], ['lfcp-', 'FLINK'],
+  ['lksqlc-', 'KSQL'], ['lsrc-', 'SCHEMA REGISTRY'], ['lz-', 'CLUSTER LINK'],
+];
+function resourceType(id) {
+  if (!id) return null;
+  for (const [prefix, label] of RESOURCE_PREFIX_TYPES) {
+    if (id.startsWith(prefix)) return label;
+  }
+  return null;
+}
+
+function renderResourceCost(rows) {
+  el('resource-cost').innerHTML = rows.length
+    ? rows.map(r => {
+        const t = resourceType(r.resource_id);
+        const badge = t ? ` <span class="pill INFO">${t}</span>` : '';
+        return `<tr><td><code>${esc(r.resource_id)}</code>${badge}</td><td style="text-align:right">${fmtUSD(r.amount)}</td></tr>`;
+      }).join('')
+    : '<tr><td colspan="2" class="empty">No cost data yet.</td></tr>';
+}
+
+function renderQuotas(rows) {
+  el('quotas').innerHTML = rows.length ? rows.map(q => {
+    const pct = q.utilization_pct ?? 0;
+    const cls = pct >= 100 ? 'crit' : pct >= 90 ? 'warn' : '';
+    const detail = (q.usage != null && q.applied_limit != null) ? `${q.usage} / ${q.applied_limit}` : '';
+    return `<div class="quota-row"><div class="label"><span>${esc(q.display_name)}</span><span>${pct}% <span class="sub">${detail}</span></span></div>
+      <div class="bar-track"><div class="bar-fill ${cls}" style="width:${Math.min(pct,100)}%"></div></div></div>`;
+  }).join('') : '<div class="empty">No quota usage available. (Some quotas expose only limits, not usage.)</div>';
+}
+
+function renderAlerts(rows) {
+  el('alerts').innerHTML = rows.length ? rows.map(a => {
+    const when = a.sent_at ? new Date(a.sent_at).toLocaleString() : '';
+    return `<tr>
+      <td><span class="pill ${a.severity}">${a.severity}</span></td>
+      <td><code>${esc(a.alert_name)}</code></td>
+      <td>${a.resource_id ? `<code>${esc(a.resource_id)}</code>` : '<span class="sub">org</span>'}</td>
+      <td>${esc(a.message)}</td>
+      <td class="sub">${when}</td>
+      <td class="sub">${esc(a.delivery_status)}</td></tr>`;
+  }).join('') : '<tr><td colspan="6" class="empty">No alerts recorded yet. Run the scheduler to generate some.</td></tr>';
+}
+
+function renderClusters(rows) {
+  el('clusters').innerHTML = rows.length ? rows.map(c => `<tr>
+    <td><code>${esc(c.resource_id)}</code><br><span class="sub">${esc(c.display_name)||''}</span></td>
+    <td>${esc(c.kind)||'—'}</td>
+    <td>${esc(c.cloud)||'—'} ${esc(c.region)||''}</td>
+    <td><span class="pill ${esc(c.phase)}">${esc(c.phase)||'—'}</span></td></tr>`).join('')
+    : '<tr><td colspan="4" class="empty">No clusters found.</td></tr>';
+}
+
+function renderConnectors(rows) {
+  el('connectors').innerHTML = rows.length ? rows.map(c => `<tr>
+    <td><code>${esc(c.connector_name)||esc(c.resource_id)}</code></td>
+    <td><span class="pill ${esc(c.state)}">${esc(c.state)||'—'}</span></td>
+    <td>${c.task_count ?? '—'}</td>
+    <td>${c.failed_task_count ?? 0}</td></tr>`).join('')
+    : '<tr><td colspan="4" class="empty">No connectors found.</td></tr>';
+}
+
+function renderFlink(rows) {
+  el('flink').innerHTML = rows.length ? rows.map(p => {
+    const idle = p.phase === 'PROVISIONED' && (p.current_cfu ?? 0) === 0;
+    return `<tr>
+      <td><code>${esc(p.resource_id)}</code><br><span class="sub">${esc(p.display_name)||''}</span></td>
+      <td>${esc(p.cloud)||'—'} ${esc(p.region)||''}</td>
+      <td>${p.current_cfu ?? '—'} / ${p.max_cfu ?? '—'}${idle ? ' <span class="pill WARNING">idle</span>' : ''}</td>
+      <td><span class="pill ${esc(p.phase)}">${esc(p.phase)||'—'}</span></td></tr>`;
+  }).join('') : '<tr><td colspan="4" class="empty">No Flink compute pools found.</td></tr>';
+}
+
+async function load() {
+  try {
+    const res = await fetch('/api/snapshot');
+    const d = await res.json();
+    renderSummary(d.summary, d.alert_counts);
+    renderProductChart(d.cost_by_product);
+    renderResourceCost(d.cost_by_resource);
+    renderQuotas(d.quotas);
+    renderAlerts(d.alerts);
+    renderClusters(d.clusters);
+    renderFlink(d.flink_pools || []);
+    renderConnectors(d.connectors);
+    el('updated').textContent = 'Updated ' + new Date(d.generated_at).toLocaleTimeString();
+  } catch (e) {
+    el('updated').textContent = 'Failed to load: ' + e.message;
+  }
+}
+
+// Manual refresh reloads everything; the timer only refreshes the snapshot
+// (which is served from the DB), NOT the cost-history trend, so auto-refresh
+// makes zero live Costs API calls. The monthly trend changes at most daily and
+// reloads on manual refresh or when you change the period.
+el('refresh').addEventListener('click', () => { load(); loadTrend(); });
+let timer = setInterval(() => { if (el('auto').checked) load(); }, 60000);
+loadTrend();
+load();
+</script>
+</body>
+</html>
