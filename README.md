@@ -67,8 +67,7 @@ Metrics API authorizes specifically off that role.)
 
 ```bash
 # 1. Clone
-git clone <your-repo-url> confluent-billing-alerts
-cd confluent-billing-alerts
+gh repo clone bijoych/Confluent-Cloud-Resources-and-Billing-Alerts
 
 # 2. Install
 python3 -m venv .venv
